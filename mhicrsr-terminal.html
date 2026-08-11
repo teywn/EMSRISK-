@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>emhi</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        :root {
+            --accent: #22d3ee;
+            --accent-dim: #0e7d92;
+            --text: #d9dee5;
+            --dim: #8a919c;
+            --cr: #e0483c;
+            --sr: #5a9de0;
+        }
+
+        body, html { margin: 0; padding: 0; height: 100%; background: #0a0a0a; color: var(--text); font-family: 'Segoe UI', sans-serif; }
+        #map { height: 100vh; width: 100%; z-index: 1; }
+
+        /* ============ ГЛАВНАЯ ПАНЕЛЬ (корпус прибора) ============ */
+        #ui-panel {
+            position: absolute; top: 15px; right: 15px; z-index: 1000; width: 322px;
+            border-radius: 18px;
+            background: linear-gradient(180deg, #2c3037 0%, #1d2025 38%, #14161a 100%);
+            border: 1px solid #3d424b;
+            box-shadow:
+                0 20px 45px rgba(0,0,0,0.75),
+                0 3px 8px rgba(0,0,0,0.6),
+                inset 0 1px 0 rgba(255,255,255,0.09),
+                inset 0 -1px 0 rgba(0,0,0,0.65);
+            transition: width 0.25s ease;
+            max-height: calc(100vh - 30px);
+            display: flex; flex-direction: column;
+        }
+
+        /* ============ HEADER (приборная шапка) ============ */
+        .panel-header {
+            position: relative;
+            padding: 12px 14px 10px 16px;
+            border-bottom: 1px solid #0c0d10;
+            border-radius: 18px 18px 0 0;
+            background: linear-gradient(180deg, #343943 0%, #23262c 60%, #1b1e23 100%);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), inset 0 -8px 14px rgba(0,0,0,0.25);
+            flex-shrink: 0;
+        }
+        /* декоративные винты корпуса */
+        .panel-header::before, .panel-header::after {
+            content: ''; position: absolute; top: 50%; margin-top: -4px;
+            width: 8px; height: 8px; border-radius: 50%;
+            background: radial-gradient(circle at 35% 30%, #5a616c, #1a1c20 70%);
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.8), 0 1px 0 rgba(255,255,255,0.08);
+        }
+        .panel-header::before { left: 5px; }
+        .panel-header::after { right: 5px; }
+
+        .header-top { display: flex; align-items: center; justify-content: space-between; }
+        .brand { line-height: 1.1; }
+        .brand-name {
+            font-size: 19px; font-weight: 800; letter-spacing: 2.5px; color: #eef2f6;
+            text-shadow: 0 1px 0 rgba(255,255,255,0.15), 0 -1px 1px rgba(0,0,0,0.8);
+        }
+        .brand-sub { font-size: 9px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--dim); margin-top: 2px; }
+
+        .header-controls { display: flex; gap: 6px; }
+        .hdr-btn {
+            width: 28px; height: 28px; border-radius: 8px; cursor: pointer;
+            background: linear-gradient(180deg, #3c414b, #23262c);
+            border: 1px solid #101216; color: #cfd5dd; font-size: 13px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.12);
+            display: flex; align-items: center; justify-content: center;
+            transition: box-shadow 0.1s, transform 0.1s;
+        }
+        .hdr-btn:active {
+            box-shadow: inset 0 3px 7px rgba(0,0,0,0.65);
+            transform: translateY(1px);
+            background: linear-gradient(180deg, #22252b, #2c3038);
+        }
+
+        .header-bottom {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-top: 9px; padding: 5px 9px;
+            border-radius: 8px;
+            background: #0e1013;
+            box-shadow: inset 0 2px 6px rgba(0,0,0,0.8), inset 0 -1px 0 rgba(255,255,255,0.05), 0 1px 0 rgba(255,255,255,0.05);
+            border: 1px solid #060708;
+        }
+        .live-block { display: flex; align-items: center; gap: 7px; font-size: 10px; font-weight: 700; letter-spacing: 1.5px; color: #9fe8b5; }
+        .led {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: radial-gradient(circle at 35% 30%, #b8ffce, #2ee06e 55%, #0d7a38);
+            box-shadow: 0 0 7px rgba(46,224,110,0.75), inset 0 -1px 2px rgba(0,0,0,0.45);
+            animation: ledPulse 2.4s ease-in-out infinite;
+        }
+        @keyframes ledPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
+        #utc-clock {
+            font-family: 'Consolas', 'Courier New', monospace; font-size: 13px; font-weight: 700;
+            color: var(--accent); letter-spacing: 1px;
+            text-shadow: 0 0 6px rgba(34,211,238,0.35);
+        }
+        .utc-label { font-size: 8px; color: var(--dim); letter-spacing: 1px; margin-left: 4px; }
+
+        /* ============ ТЕЛО ПАНЕЛИ ============ */
+        #panel-content { overflow-y: auto; padding-bottom: 10px; scrollbar-width: thin; scrollbar-color: #3d424b transparent; }
+        #panel-content::-webkit-scrollbar { width: 6px; }
+        #panel-content::-webkit-scrollbar-thumb { background: #3d424b; border-radius: 3px; }
+
+        /* ============ СЕКЦИИ (модули прибора) ============ */
+        .section {
+            margin: 10px 12px 0 12px;
+            border-radius: 12px;
+            background: linear-gradient(180deg, #24272d, #1a1d22);
+            border: 1px solid #363b43;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 2px 6px rgba(0,0,0,0.45);
+            overflow: hidden;
+        }
+        .section-head {
+            width: 100%; display: flex; align-items: center; gap: 8px;
+            padding: 9px 12px; cursor: pointer; border: none;
+            background: linear-gradient(180deg, #2e323a, #20232a);
+            color: #c9d0da; font-size: 11px; font-weight: 700; letter-spacing: 1.6px;
+            font-family: inherit; text-align: left;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+            transition: background 0.15s;
+        }
+        .section-head:hover { background: linear-gradient(180deg, #343943, #24272e); }
+        .section-head .chev { font-size: 9px; color: var(--accent); width: 12px; transition: transform 0.2s; }
+        .section.open .section-head .chev { transform: rotate(90deg); }
+        .section-body {
+            max-height: 0; overflow: hidden;
+            transition: max-height 0.28s ease;
+            background: #101216;
+            box-shadow: inset 0 3px 10px rgba(0,0,0,0.7), inset 0 -1px 0 rgba(255,255,255,0.04);
+        }
+        .section.open .section-body { max-height: 520px; }
+        .section-inner { padding: 12px; }
+
+        /* ============ MODE SELECTOR (физический переключатель) ============ */
+        .mode-section { padding: 12px; }
+        .mode-track {
+            display: flex; padding: 5px; gap: 5px;
+            border-radius: 12px;
+            background: #0d0f12;
+            border: 1px solid #060708;
+            box-shadow: inset 0 3px 9px rgba(0,0,0,0.85), inset 0 -1px 0 rgba(255,255,255,0.05), 0 1px 0 rgba(255,255,255,0.05);
+        }
+        .mode-track button {
+            flex: 1; padding: 11px 6px; border: 1px solid transparent; border-radius: 9px;
+            cursor: pointer; font-family: inherit; font-size: 11px; font-weight: 800; letter-spacing: 1px;
+            color: #6d747f; background: transparent; transition: all 0.15s;
+            display: flex; flex-direction: column; align-items: center; gap: 3px;
+        }
+        .mode-track button .mode-icon { font-size: 16px; }
+        .mode-track button.active-cr {
+            background: linear-gradient(180deg, #4a2018, #33150f);
+            border-color: #1a0a06; color: #ffb3a6;
+            box-shadow: inset 0 3px 9px rgba(0,0,0,0.7), inset 0 -1px 0 rgba(255,120,90,0.18), 0 1px 0 rgba(255,255,255,0.04);
+            text-shadow: 0 0 8px rgba(224,72,60,0.5);
+        }
+        .mode-track button.active-sr {
+            background: linear-gradient(180deg, #16283e, #0f1c2c);
+            border-color: #081019; color: #b3d9ff;
+            box-shadow: inset 0 3px 9px rgba(0,0,0,0.7), inset 0 -1px 0 rgba(90,157,224,0.22), 0 1px 0 rgba(255,255,255,0.04);
+            text-shadow: 0 0 8px rgba(90,157,224,0.5);
+        }
+        .mode-caption { font-size: 9px; color: var(--dim); text-align: center; margin-top: 7px; letter-spacing: 1.2px; text-transform: uppercase; }
+
+        /* ============ SCAN BUTTON (аппаратная кнопка) ============ */
+        #scan-btn {
+            width: 100%; padding: 14px 10px; border-radius: 11px; cursor: pointer;
+            font-family: inherit; font-size: 13px; font-weight: 900; letter-spacing: 2px;
+            color: #03222b; text-shadow: 0 1px 0 rgba(255,255,255,0.35);
+            background: linear-gradient(180deg, #56e2f7 0%, #1cb8d6 45%, #0d8ba6 100%);
+            border: 1px solid #065a6e;
+            box-shadow:
+                0 5px 12px rgba(0,0,0,0.6),
+                0 1px 3px rgba(0,0,0,0.5),
+                inset 0 1px 0 rgba(255,255,255,0.45),
+                inset 0 -3px 6px rgba(0,0,0,0.28);
+            transition: all 0.12s;
+        }
+        #scan-btn:hover:not(:disabled) { background: linear-gradient(180deg, #6be8fa 0%, #25c2e0 45%, #1095b2 100%); }
+        #scan-btn:active:not(:disabled) {
+            transform: translateY(2px);
+            box-shadow: 0 1px 4px rgba(0,0,0,0.6), inset 0 3px 10px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.2);
+        }
+        #scan-btn:disabled {
+            cursor: wait; color: #5a6a72;
+            background: linear-gradient(180deg, #2c6b7a, #1a4550);
+            border-color: #123038; text-shadow: none;
+            box-shadow: inset 0 3px 10px rgba(0,0,0,0.55), inset 0 -1px 0 rgba(255,255,255,0.06);
+        }
+
+        .progress-track {
+            margin-top: 10px; height: 12px; border-radius: 7px;
+            background: #0a0c0e; border: 1px solid #050607;
+            box-shadow: inset 0 2px 6px rgba(0,0,0,0.85), 0 1px 0 rgba(255,255,255,0.05);
+            overflow: hidden;
+        }
+        #scan-progress {
+            height: 100%; width: 0%;
+            border-radius: 6px;
+            background: linear-gradient(180deg, #6be8fa, #1298b5);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), inset 0 -2px 3px rgba(0,0,0,0.3);
+            transition: width 0.3s ease;
+        }
+
+        /* ============ STATUS CARD (приборный блок) ============ */
+        .status-card { padding: 12px; }
+        .status-screen {
+            border-radius: 9px; padding: 10px 12px;
+            background: linear-gradient(180deg, #0b0e11, #0e1114);
+            border: 1px solid #050607;
+            box-shadow: inset 0 3px 10px rgba(0,0,0,0.85), inset 0 -1px 0 rgba(255,255,255,0.04), 0 1px 0 rgba(255,255,255,0.05);
+        }
+        #status { font-size: 12px; color: #9aa3ae; font-weight: 700; font-family: 'Consolas', monospace; min-height: 15px; }
+        .status-stats { display: flex; gap: 8px; margin-top: 10px; }
+        .stat-cell {
+            flex: 1; text-align: center; padding: 8px 4px 6px 4px; border-radius: 8px;
+            background: linear-gradient(180deg, #1e2126, #14171b);
+            border: 1px solid #2c3138;
+            box-shadow: inset 0 2px 5px rgba(0,0,0,0.55), inset 0 -1px 0 rgba(255,255,255,0.05);
+        }
+        .stat-cell span { display: block; font-size: 15px; font-weight: 800; color: var(--accent); font-family: 'Consolas', monospace; }
+        .stat-cell label { font-size: 8px; letter-spacing: 1px; color: var(--dim); text-transform: uppercase; }
+
+        /* ============ TIMELINE (приборная шкала) ============ */
+        .tl-scale-labels { display: flex; justify-content: space-between; font-size: 9px; font-weight: 800; letter-spacing: 1.5px; color: var(--dim); margin-bottom: 6px; }
+        .tl-scale-labels .tl-now { color: var(--accent); }
+        .tl-readout {
+            text-align: center; margin-bottom: 10px; padding: 7px;
+            border-radius: 8px; background: #0b0d10; border: 1px solid #050607;
+            box-shadow: inset 0 2px 7px rgba(0,0,0,0.85), 0 1px 0 rgba(255,255,255,0.05);
+        }
+        #timeline-val { font-family: 'Consolas', monospace; font-size: 14px; font-weight: 800; color: var(--accent); text-shadow: 0 0 7px rgba(34,211,238,0.35); }
+        .tl-caption { font-size: 8px; letter-spacing: 1.5px; color: var(--dim); text-transform: uppercase; }
+
+        /* Скевоморфный слайдер */
+        #timeline-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 26px; background: transparent; cursor: pointer; margin: 0; }
+        #timeline-slider::-webkit-slider-runnable-track {
+            height: 12px; border-radius: 7px;
+            background: linear-gradient(90deg, #3a2c4d 0%, #1a1d22 45%, #1a1d22 55%, #12303a 100%);
+            border: 1px solid #050607;
+            box-shadow: inset 0 2px 6px rgba(0,0,0,0.85), 0 1px 0 rgba(255,255,255,0.05);
+        }
+        #timeline-slider::-webkit-slider-thumb {
+            -webkit-appearance: none; appearance: none;
+            width: 22px; height: 22px; margin-top: -6px; border-radius: 50%;
+            background: radial-gradient(circle at 35% 30%, #7a828e, #3a3f47 55%, #1d2025);
+            border: 1px solid #0a0b0d;
+            box-shadow: 0 3px 6px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.25), inset 0 -2px 4px rgba(0,0,0,0.4);
+        }
+        #timeline-slider::-moz-range-track {
+            height: 12px; border-radius: 7px;
+            background: linear-gradient(90deg, #3a2c4d 0%, #1a1d22 45%, #1a1d22 55%, #12303a 100%);
+            border: 1px solid #050607;
+            box-shadow: inset 0 2px 6px rgba(0,0,0,0.85);
+        }
+        #timeline-slider::-moz-range-thumb {
+            width: 20px; height: 20px; border-radius: 50%;
+            background: radial-gradient(circle at 35% 30%, #7a828e, #3a3f47 55%, #1d2025);
+            border: 1px solid #0a0b0d;
+            box-shadow: 0 3px 6px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.25);
+        }
+
+        /* ============ SELECT (утопленный) ============ */
+        select {
+            width: 100%; padding: 9px 10px; border-radius: 9px;
+            background: #0e1013; color: #cfd5dd; font-size: 12px; font-family: inherit;
+            border: 1px solid #050607;
+            box-shadow: inset 0 2px 7px rgba(0,0,0,0.8), 0 1px 0 rgba(255,255,255,0.05);
+            outline: none; cursor: pointer;
+        }
+
+        /* ============ LEGEND (вертикальная шкала) ============ */
+        .legend-scale { display: flex; gap: 10px; align-items: stretch; }
+        .legend-bar {
+            width: 26px; min-height: 210px; border-radius: 7px;
+            border: 1px solid #050607;
+            box-shadow: inset 0 2px 5px rgba(0,0,0,0.5), inset 0 -2px 5px rgba(0,0,0,0.4), 0 1px 0 rgba(255,255,255,0.06), 0 2px 6px rgba(0,0,0,0.5);
+        }
+        .legend-ticks { display: flex; flex-direction: column; justify-content: space-between; padding: 1px 0; }
+        .legend-ticks span { font-size: 10px; font-weight: 700; color: #9aa3ae; font-family: 'Consolas', monospace; line-height: 1; }
+        .legend-ticks span::before { content: '— '; color: #4a505a; }
+        .legend-side { flex: 1; display: flex; flex-direction: column; justify-content: space-between; }
+        .legend-side-note { font-size: 9px; color: var(--dim); letter-spacing: 1px; text-transform: uppercase; }
+
+        .hazard-legend-container { display: flex; gap: 8px; margin-top: 12px; justify-content: space-between; }
+        .hazard-legend-box {
+            display: flex; flex-direction: column; align-items: center; gap: 6px; width: 32%;
+            padding: 8px 4px; border-radius: 9px;
+            background: linear-gradient(180deg, #1e2126, #14171b);
+            border: 1px solid #2c3138;
+            box-shadow: inset 0 2px 5px rgba(0,0,0,0.5), inset 0 -1px 0 rgba(255,255,255,0.05);
+        }
+        .hazard-legend-icon { width: 36px; height: 36px; border: 1px solid #050607; border-radius: 6px; background: #4a505a; box-shadow: 0 2px 4px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1); }
+        .hazard-legend-text { font-size: 8px; font-weight: 900; color: #b9c0ca; text-transform: uppercase; text-align: center; letter-spacing: 0.5px; }
+
+        /* ============ COMPACT MODE (иконочная рейка) ============ */
+        #compact-rail { display: none; flex-direction: column; align-items: center; gap: 8px; padding: 12px 0 14px 0; }
+        .rail-btn {
+            width: 38px; height: 38px; border-radius: 10px; cursor: pointer; font-size: 16px;
+            background: linear-gradient(180deg, #3c414b, #23262c);
+            border: 1px solid #101216; color: #cfd5dd;
+            box-shadow: 0 3px 6px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.12);
+            display: flex; align-items: center; justify-content: center;
+            transition: box-shadow 0.1s, transform 0.1s;
+        }
+        .rail-btn:active { box-shadow: inset 0 3px 8px rgba(0,0,0,0.65); transform: translateY(1px); }
+        .rail-btn.rail-cr { color: #ff9b8a; }
+        .rail-btn.rail-sr { color: #9cc8f5; }
+
+        #ui-panel.compact { width: 66px; }
+        #ui-panel.compact #panel-content { display: none; }
+        #ui-panel.compact .brand-sub, #ui-panel.compact .header-bottom { display: none; }
+        #ui-panel.compact .brand-name { font-size: 11px; letter-spacing: 1px; writing-mode: vertical-rl; margin: 4px auto 0 auto; }
+        #ui-panel.compact .header-top { flex-direction: column; gap: 8px; }
+        #ui-panel.compact .header-controls { flex-direction: column; }
+        #ui-panel.compact #compact-rail { display: flex; }
+        #ui-panel.compact .panel-header { border-radius: 18px 18px 0 0; }
+        #ui-panel.compact .hdr-btn.hide-in-compact { display: none; }
+
+        /* ============ MODALS ============ */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.82); z-index: 2000; justify-content: center; align-items: center; }
+        .modal-content {
+            background: linear-gradient(180deg, #2a2e35, #181b20);
+            border: 1px solid #3d424b; padding: 24px; border-radius: 16px;
+            max-width: 400px; width: calc(100% - 40px); text-align: left; color: #d5dae1; line-height: 1.6;
+            box-shadow: 0 24px 60px rgba(0,0,0,0.85), inset 0 1px 0 rgba(255,255,255,0.09);
+        }
+        .modal-content h2 { color: var(--accent); margin-top: 0; text-align: center; letter-spacing: 2px; font-size: 17px; text-shadow: 0 0 10px rgba(34,211,238,0.3); }
+        .modal-content input[type="number"] {
+            width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box;
+            background: #0e1013; color: #fff; border: 1px solid #050607; border-radius: 8px;
+            box-shadow: inset 0 2px 6px rgba(0,0,0,0.8); outline: none; font-family: inherit;
+        }
+        .modal-content input[type="range"] { width: 100%; margin-top: 5px; accent-color: var(--accent); }
+        .close-btn {
+            width: 100%; margin-top: 20px; padding: 11px; border-radius: 10px; cursor: pointer;
+            background: linear-gradient(180deg, #56e2f7, #0d8ba6); color: #03222b;
+            font-weight: 800; letter-spacing: 1px; border: 1px solid #065a6e; font-family: inherit;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.4);
+            transition: all 0.12s;
+        }
+        .close-btn:active { transform: translateY(1px); box-shadow: inset 0 3px 8px rgba(0,0,0,0.4); }
+
+        /* ============ LEAFLET: контрол слоёв и попап ============ */
+        .leaflet-control-layers {
+            background: linear-gradient(180deg, #2a2e35, #181b20) !important;
+            border: 1px solid #3d424b !important; color: #d5dae1 !important;
+            border-radius: 12px !important;
+            box-shadow: 0 10px 24px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.08) !important;
+        }
+        .leaflet-control-layers-toggle { filter: invert(0.85); }
+        .leaflet-control-layers label { font-size: 12px; }
+        .leaflet-bar a {
+            background: linear-gradient(180deg, #343943, #20232a) !important;
+            color: #d5dae1 !important; border-color: #101216 !important;
+        }
+        .leaflet-popup-content-wrapper {
+            background: linear-gradient(180deg, #272b32, #15181d);
+            color: #dfe5ec; border: 1px solid #3d424b; border-radius: 11px;
+            box-shadow: 0 12px 28px rgba(0,0,0,0.75), inset 0 1px 0 rgba(255,255,255,0.08);
+            font-family: 'Segoe UI', sans-serif;
+        }
+        .leaflet-popup-tip { background: #15181d; border: 1px solid #3d424b; }
+        .leaflet-popup-content b { color: var(--accent); }
+        .leaflet-popup-close-button { color: #8a919c !important; }
+
+        /* ============ RESPONSIVE ============ */
+        @media (max-width: 640px) {
+            #ui-panel { top: auto; bottom: 10px; right: 10px; left: 10px; width: auto; max-height: 55vh; }
+            #ui-panel.compact { left: auto; width: 62px; bottom: 10px; }
+            .section.open .section-body { max-height: 60vh; }
+            #scan-btn { padding: 16px 10px; }
+            .hdr-btn { width: 32px; height: 32px; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ВЕКТОРНЫЕ УЗОРЫ ДЛЯ УГРОЗ -->
+    <svg style="width:0;height:0;position:absolute;" aria-hidden="true" focusable="false">
+        <defs>
+            <pattern id="pat-hail" width="10" height="10" patternUnits="userSpaceOnUse">
+                <circle cx="5" cy="5" r="1.5" fill="#111" opacity="0.8"/>
+            </pattern>
+            <!-- Шквал: Тонкие линии с наклоном / / / -->
+            <pattern id="pat-squall" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <line x1="0" y1="0" x2="0" y2="8" stroke="#111" stroke-width="2" opacity="0.8"/>
+            </pattern>
+            <!-- Торнадо: Идеальная ромбовидная сетка (Crosshatch) крест-накрест -->
+            <pattern id="pat-tornado" width="12" height="12" patternUnits="userSpaceOnUse">
+                <path d="M-2,14 L14,-2 M-2,-2 L14,14" stroke="#111" stroke-width="2" opacity="0.9"/>
+            </pattern>
+            <!-- Обычная сетка (Ледяной дождь) -->
+            <pattern id="pat-grid" width="8" height="8" patternUnits="userSpaceOnUse">
+                <rect width="8" height="8" fill="none" stroke="#111" stroke-width="1.5" opacity="0.8"/>
+            </pattern>
+            <!-- Мокрый снег -->
+            <pattern id="pat-wetsnow" width="14" height="14" patternUnits="userSpaceOnUse">
+                <path d="M 7 3 L 7 11 M 3 7 L 11 7" fill="none" stroke="#111" stroke-width="1.8" opacity="0.8"/>
+            </pattern>
+        </defs>
+    </svg>
+
+    <div id="ui-panel">
+        <!-- HEADER -->
+        <div class="panel-header">
+            <div class="header-top">
+                <div class="brand">
+                    <div class="brand-name">EMHI</div>
+                    <div class="brand-sub">Meteorological Intelligence · MHI CR/SR</div>
+                </div>
+                <div class="header-controls">
+                    <button class="hdr-btn hide-in-compact" title="Настройки" onclick="document.getElementById('settings-modal').style.display='flex'">⚙</button>
+                    <button class="hdr-btn hide-in-compact" title="О нас" onclick="document.getElementById('about-modal').style.display='flex'">ℹ</button>
+                    <button class="hdr-btn" id="compact-btn" title="Компактный режим" onclick="setCompact(true)">▤</button>
+                    <button class="hdr-btn hide-in-compact" id="panel-toggle-btn" title="Свернуть панель" onclick="togglePanel()">➖</button>
+                </div>
+            </div>
+            <div class="header-bottom">
+                <div class="live-block"><div class="led"></div>LIVE</div>
+                <div><span id="utc-clock">--:--:--</span><span class="utc-label">UTC</span></div>
+            </div>
+        </div>
+
+        <!-- COMPACT RAIL -->
+        <div id="compact-rail">
+            <button class="rail-btn" title="Развернуть панель" onclick="setCompact(false)">⚡</button>
+            <button class="rail-btn rail-cr" title="Режим: Конвекция" onclick="setMode('CR')">🔥</button>
+            <button class="rail-btn rail-sr" title="Режим: Снег / Лед" onclick="setMode('SR')">❄</button>
+            <button class="rail-btn" title="Сканировать экран" onclick="scanCurrentView()">📡</button>
+            <button class="rail-btn" title="Таймлайн" onclick="openSection('sec-timeline')">⏱</button>
+            <button class="rail-btn" title="Легенда" onclick="openSection('sec-legend')">▦</button>
+            <button class="rail-btn" title="Настройки" onclick="document.getElementById('settings-modal').style.display='flex'">⚙</button>
+        </div>
+
+        <!-- PANEL CONTENT -->
+        <div id="panel-content">
+
+            <!-- MODE -->
+            <div class="section">
+                <div class="mode-section">
+                    <div class="mode-track">
+                        <button id="btn-cr" class="active-cr" onclick="setMode('CR')"><span class="mode-icon">🔥</span>CONVECTION</button>
+                        <button id="btn-sr" onclick="setMode('SR')"><span class="mode-icon">❄</span>WINTER</button>
+                    </div>
+                    <div class="mode-caption">True Fujita (F-Scale) &amp; OSM Engine</div>
+                </div>
+            </div>
+
+            <!-- SCAN -->
+            <div class="section open" id="sec-scan">
+                <button class="section-head" onclick="toggleSection('sec-scan')"><span class="chev">▶</span>SCAN</button>
+                <div class="section-body">
+                    <div class="section-inner">
+                        <button id="scan-btn" onclick="scanCurrentView()">📡 SCAN AREA</button>
+                        <div class="progress-track"><div id="scan-progress"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- STATUS -->
+            <div class="section open" id="sec-status">
+                <button class="section-head" onclick="toggleSection('sec-status')"><span class="chev">▶</span>STATUS</button>
+                <div class="section-body">
+                    <div class="status-card">
+                        <div class="status-screen"><div id="status">Наведите карту на нужную область...</div></div>
+                        <div class="status-stats">
+                            <div class="stat-cell"><span id="stat-zones">—</span><label>Zones</label></div>
+                            <div class="stat-cell"><span id="stat-max">—</span><label>Max Risk</label></div>
+                            <div class="stat-cell"><span id="stat-mode">CR</span><label>Mode</label></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TIMELINE -->
+            <div class="section open" id="sec-timeline">
+                <button class="section-head" onclick="toggleSection('sec-timeline')"><span class="chev">▶</span>TIMELINE</button>
+                <div class="section-body">
+                    <div class="section-inner">
+                        <div class="tl-readout">
+                            <div class="tl-caption">Time Offset</div>
+                            <span id="timeline-val">Сейчас (0 ч.)</span>
+                        </div>
+                        <div class="tl-scale-labels"><span>◀ PAST</span><span class="tl-now">● NOW</span><span>FORECAST ▶</span></div>
+                        <input type="range" id="timeline-slider" min="-24" max="24" value="0" step="1" oninput="updateTimelineText()">
+                    </div>
+                </div>
+            </div>
+
+            <!-- RENDER -->
+            <div class="section" id="sec-render">
+                <button class="section-head" onclick="toggleSection('sec-render')"><span class="chev">▶</span>RENDER MODE</button>
+                <div class="section-body">
+                    <div class="section-inner">
+                        <select id="render-mode" onchange="renderSavedData()">
+                            <option value="isoline">Точные Изолинии (Скругление)</option>
+                            <option value="pixel">Сырые Пиксели (Квадраты)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LEGEND -->
+            <div class="section" id="sec-legend">
+                <button class="section-head" onclick="toggleSection('sec-legend')"><span class="chev">▶</span>LEGEND</button>
+                <div class="section-body">
+                    <div class="section-inner">
+                        <div class="legend-side-note" style="margin-bottom:8px;">Шкала угрозы (1–10)</div>
+                        <div id="legend-container"></div>
+                        <div class="legend-side-note" style="margin-top:12px;">Спец-угрозы</div>
+                        <div id="hazard-legend" class="hazard-legend-container"></div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <div id="settings-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h2>⚙ Настройки</h2>
+            <div style="margin-bottom: 10px;">
+                <label style="font-size: 13px;">История (до -48 часов):</label>
+                <input type="number" id="set-past" value="24" min="1" max="48">
+            </div>
+            <div style="margin-bottom: 10px;">
+                <label style="font-size: 13px;">Прогноз (до +48 часов):</label>
+                <input type="number" id="set-future" value="24" min="1" max="48">
+            </div>
+            <div style="margin-bottom: 10px;">
+                <label style="font-size: 13px;">Шаг сетки (Детальность): <span id="step-val-display" style="color: #22d3ee; font-weight: bold;">0.35</span></label>
+                <input type="range" id="set-step" min="0.1" max="1.5" step="0.05" value="0.35" oninput="document.getElementById('step-val-display').innerText=this.value">
+            </div>
+            <button class="close-btn" onclick="applySettings()">Сохранить настройки</button>
+        </div>
+    </div>
+
+    <div id="about-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h2>О платформе</h2>
+            <p>Движок <b>Chaikin True-Value Opaque Engine</b> строит 100% сплошные изолинии. Названия городов выводятся отдельным слоем поверх радара. Поддерживает классическую шкалу Фудзиты (F0-F5) для торнадо и карты OpenStreetMap.</p>
+            <p style="margin-top: 25px; font-style: italic; color: #888;">С любовью,<br>Команда EMHI и Muffy</p>
+            <button class="close-btn" onclick="document.getElementById('about-modal').style.display='none'">Понятно</button>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Инициализация карты
+        const map = L.map('map', {
+            center: [55.75, 37.61],
+            zoom: 5
+        });
+
+        // Панель для текста городов (Поверх всего радара)
+        map.createPane('cityLabels');
+        map.getPane('cityLabels').style.zIndex = 650;
+        map.getPane('cityLabels').style.pointerEvents = 'none';
+        map.getPane('cityLabels').style.opacity = 0.8;
+
+        // БАЗОВЫЕ КАРТЫ
+        const cartoBg = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', { attribution: '&copy; CARTO' });
+        const cartoLabels = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', { pane: 'cityLabels' });
+        const darkMapGroup = L.layerGroup([cartoBg, cartoLabels]);
+
+        // Интеграция GOOGLE MAPS напрямую через тайлы без ключа
+        const googleSatBg = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', { attribution: 'Google' });
+        const googleLabels = L.tileLayer('https://mt1.google.com/vt/lyrs=h&x={x}&y={y}&z={z}', { pane: 'cityLabels' });
+        const googleSatGroup = L.layerGroup([googleSatBg]);
+        const googleHybridGroup = L.layerGroup([googleSatBg, googleLabels]);
+
+        // Интеграция OPENSTREETMAP
+        const osmBg = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' });
+        const osmGroup = L.layerGroup([osmBg, cartoLabels]); // Города поверх для OSM
+
+        darkMapGroup.addTo(map); // По умолчанию темная карта
+
+        // Добавляем переключатель карт в левый верхний угол
+        const baseMaps = {
+            "Темная карта (CARTO)": darkMapGroup,
+            "Спутник (Google)": googleSatGroup,
+            "Гибрид (Google)": googleHybridGroup,
+            "OpenStreetMap (OSM)": osmGroup
+        };
+        L.control.layers(baseMaps, null, { position: 'topleft' }).addTo(map);
+
+        // Слои для радара
+        let riskLayer = L.layerGroup().addTo(map);
+        let labelsLayer = L.layerGroup().addTo(map);
+
+        let currentMode = 'CR';
+        let globalStep = 0.35;
+        let drawnPointsCache = [];
+
+        // ПАЛИТРА С АЛЬФА-КАНАЛОМ 255 (ПОЛНОСТЬЮ Сплошной цвет)
+        // ИСПРАВЛЕНО: SR уровень 6 был 'rgba(0,0,0,243,1)' — невалидный rgba (5 компонентов)
+        const PALETTES = {
+            'CR': {
+                1: 'rgba(137,137,197,1)', 2: 'rgba(0,0,243,1)', 3: 'rgba(0,243,243,1)', 4: 'rgba(0,243,0,1)',
+                5: 'rgba(183,243,0,1)', 6: 'rgba(243,243,0,1)', 7: 'rgba(243,121,0,1)', 8: 'rgba(243,0,0,1)',
+                9: 'rgba(243,0,171,1)', 10: 'rgba(243,0,243,1)'
+            },
+            'SR': {
+                1: 'rgba(137,197,197,1)', 2: 'rgba(0,243,243,1)', 3: 'rgba(0,182,243,1)', 4: 'rgba(0,121,243,1)',
+                5: 'rgba(0,72,243,1)', 6: 'rgba(0,0,243,1)', 7: 'rgba(109,0,243,1)', 8: 'rgba(144,0,243,1)',
+                9: 'rgba(194,0,243,1)', 10: 'rgba(222,0,243,1)'
+            }
+        };
+
+        // --- УМНЫЕ ПОПАПЫ ДЛЯ ДАЛЬТОНИКОВ ---
+        map.on('click', function(e) {
+            if (drawnPointsCache.length === 0) return;
+            let closest = null; let minDist = Infinity;
+            drawnPointsCache.forEach(pt => {
+                let dist = Math.pow(pt.lat - e.latlng.lat, 2) + Math.pow(pt.lon - e.latlng.lng, 2);
+                if (dist < minDist) { minDist = dist; closest = pt; }
+            });
+            let targetRisk = currentMode === 'CR' ? closest.cr : closest.sr;
+            if (closest && Math.sqrt(minDist) < globalStep * 1.5 && targetRisk > 0) {
+                let fTxt = (currentMode === 'CR' && closest.fScale >= 0) ? `<br><b>Интенсивность Торнадо:</b> F${closest.fScale} (Шкала Фудзиты)` : '';
+                L.popup().setLatLng(e.latlng)
+                 .setContent(`<b>MHI-CR (Конв. риск):</b> ${closest.cr}/10<br><b>MHI-SR (Снеж. риск):</b> ${closest.sr}/10${fTxt}`)
+                 .openOn(map);
+            }
+        });
+
+        // --- UTC ЧАСЫ В ШАПКЕ ---
+        function updateUTCClock() {
+            const el = document.getElementById('utc-clock');
+            if (el) el.innerText = new Date().toUTCString().slice(17, 25);
+        }
+        setInterval(updateUTCClock, 1000);
+        updateUTCClock();
+
+        // --- АККОРДЕОН СЕКЦИЙ ---
+        function toggleSection(id) {
+            const el = document.getElementById(id);
+            if (el) el.classList.toggle('open');
+        }
+
+        // --- COMPACT MODE ---
+        function setCompact(on) {
+            document.getElementById('ui-panel').classList.toggle('compact', on);
+        }
+        function openSection(id) {
+            setCompact(false);
+            const content = document.getElementById('panel-content');
+            if (content.style.display === 'none') togglePanel();
+            const el = document.getElementById(id);
+            if (el && !el.classList.contains('open')) el.classList.add('open');
+        }
+
+        function togglePanel() {
+            const content = document.getElementById('panel-content');
+            const btn = document.getElementById('panel-toggle-btn');
+            if (content.style.display === 'none') { content.style.display = 'block'; btn.innerText = '➖'; btn.title = 'Свернуть панель'; }
+            else { content.style.display = 'none'; btn.innerText = '➕'; btn.title = 'Развернуть панель'; }
+        }
+
+        function updateTimelineText() {
+            let val = parseInt(document.getElementById('timeline-slider').value);
+            document.getElementById('timeline-val').innerText = val === 0 ? 'Сейчас (0 ч.)' : (val > 0 ? `Прогноз: +${val} ч.` : `История: ${val} ч.`);
+        }
+
+        function applySettings() {
+            let past = parseInt(document.getElementById('set-past').value) || 24;
+            let future = parseInt(document.getElementById('set-future').value) || 24;
+            globalStep = parseFloat(document.getElementById('set-step').value) || 0.35;
+            let slider = document.getElementById('timeline-slider');
+            slider.min = -past; slider.max = future;
+            if (parseInt(slider.value) < -past) slider.value = -past;
+            if (parseInt(slider.value) > future) slider.value = future;
+            updateTimelineText();
+            document.getElementById('settings-modal').style.display = 'none';
+        }
+
+        function setMode(mode) {
+            currentMode = mode;
+            document.getElementById('btn-cr').className = mode === 'CR' ? 'active-cr' : '';
+            document.getElementById('btn-sr').className = mode === 'SR' ? 'active-sr' : '';
+            const statMode = document.getElementById('stat-mode');
+            if (statMode) statMode.innerText = mode;
+            updateLegend();
+            renderSavedData();
+        }
+
+        function updateLegend() {
+            const container = document.getElementById('legend-container');
+            const hContainer = document.getElementById('hazard-legend');
+            container.innerHTML = '';
+
+            // Вертикальная градиентная шкала 1–10 из существующей палитры
+            const cols = PALETTES[currentMode];
+            const stops = [];
+            for (let i = 1; i <= 10; i++) stops.push(cols[i]);
+            let ticks = '';
+            for (let i = 10; i >= 1; i--) ticks += `<span>${i}</span>`;
+            container.innerHTML = `
+                <div class="legend-scale">
+                    <div class="legend-bar" style="background: linear-gradient(to top, ${stops.join(', ')});"></div>
+                    <div class="legend-ticks">${ticks}</div>
+                </div>`;
+
+            if (currentMode === 'CR') {
+                hContainer.innerHTML = `
+                    <div class="hazard-legend-box"><svg class="hazard-legend-icon"><rect width="100%" height="100%" fill="url(#pat-hail)"/></svg><span class="hazard-legend-text">ГРАД</span></div>
+                    <div class="hazard-legend-box"><svg class="hazard-legend-icon"><rect width="100%" height="100%" fill="url(#pat-squall)"/></svg><span class="hazard-legend-text">ШКВАЛ</span></div>
+                    <div class="hazard-legend-box"><svg class="hazard-legend-icon"><rect width="100%" height="100%" fill="url(#pat-tornado)"/></svg><span class="hazard-legend-text">ТОРНАДО F0-F5</span></div>
+                `;
+            } else {
+                hContainer.innerHTML = `
+                    <div class="hazard-legend-box"><svg class="hazard-legend-icon"><rect width="100%" height="100%" fill="url(#pat-wetsnow)"/></svg><span class="hazard-legend-text">МОКР. СНЕГ</span></div>
+                    <div class="hazard-legend-box"><svg class="hazard-legend-icon"><rect width="100%" height="100%" fill="url(#pat-squall)"/></svg><span class="hazard-legend-text">МЕТЕЛЬ</span></div>
+                    <div class="hazard-legend-box"><svg class="hazard-legend-icon"><rect width="100%" height="100%" fill="url(#pat-grid)"/></svg><span class="hazard-legend-text">ЛЕД. ДОЖДЬ</span></div>
+                `;
+            }
+        }
+
+        async function scanCurrentView() {
+            const btn = document.getElementById('scan-btn');
+            const statusEl = document.getElementById('status');
+            const progressEl = document.getElementById('scan-progress');
+            const bounds = map.getBounds();
+            const timeOffset = parseInt(document.getElementById('timeline-slider').value);
+
+            btn.disabled = true;
+            btn.innerText = '◉ SCANNING...';
+            if (progressEl) progressEl.style.width = '0%';
+            statusEl.innerText = "Генерация сетки...";
+            statusEl.style.color = "#ffdd00";
+            drawnPointsCache = [];
+
+            try {
+                let grid = [];
+                let step = globalStep;
+                let latSpan = Math.abs(bounds.getNorth() - bounds.getSouth());
+                let lonSpan = Math.abs(bounds.getEast() - bounds.getWest());
+                let area = (latSpan * lonSpan) || 1.0;
+
+                if ((area / (step * step)) > 1000) {
+                    step = Math.max(0.1, Math.round(Math.sqrt(area / 1000) * 100) / 100);
+                }
+
+                for (let lat = Math.max(bounds.getSouth(), -80); lat <= Math.min(bounds.getNorth(), 80); lat += step) {
+                    for (let lon = Math.max(bounds.getWest(), -180); lon <= Math.min(bounds.getEast(), 180); lon += step) {
+                        grid.push({ lat: parseFloat(lat.toFixed(3)), lon: parseFloat(lon.toFixed(3)) });
+                    }
+                }
+
+                let chunks = [];
+                for (let i = 0; i < grid.length; i += 50) { chunks.push(grid.slice(i, i + 50)); }
+
+                const currentUtcHour = new Date().getUTCHours();
+                const targetIdx = 48 + currentUtcHour + timeOffset;
+
+                let completed = 0;
+                for (let chunk of chunks) {
+                    let lats = chunk.map(c => c.lat.toFixed(2)).join(',');
+                    let lons = chunk.map(c => c.lon.toFixed(2)).join(',');
+                    let url = `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}&hourly=precipitation,rain,snowfall,wind_gusts_10m,temperature_2m,cape,visibility&past_days=2&forecast_days=3&timezone=GMT`;
+
+                    try {
+                        let res = await fetch(url);
+                        if (res.status === 429) {
+                            statusEl.innerText = `Лимит API! Ждем 5 сек...`;
+                            await new Promise(r => setTimeout(r, 5000));
+                            res = await fetch(url);
+                        }
+
+                        if (res.ok) {
+                            let data = await res.json();
+                            let responsesList = Array.isArray(data) ? data : [data];
+
+                            for (let i = 0; i < responsesList.length; i++) {
+                                let point = chunk[i];
+                                let hourly = responsesList[i].hourly || {};
+
+                                const getVal = (key, def = 0.0) => {
+                                    if (hourly[key] && targetIdx >= 0 && targetIdx < hourly[key].length) {
+                                        return hourly[key][targetIdx] !== null ? parseFloat(hourly[key][targetIdx]) : def;
+                                    }
+                                    return def;
+                                };
+
+                                let precip = getVal("precipitation");
+                                let rain = getVal("rain");
+                                let snow = getVal("snowfall");
+                                let temp = getVal("temperature_2m");
+                                let cape = getVal("cape");
+                                let vis = getVal("visibility", 10000.0);
+                                let wg_ms = Math.floor(getVal("wind_gusts_10m") / 3.6);
+
+                                let maxTempPast24h = -999;
+                                if (hourly["temperature_2m"]) {
+                                    for (let t = Math.max(0, targetIdx - 24); t <= targetIdx; t++) {
+                                        if (hourly["temperature_2m"][t] !== null) {
+                                            let tVal = parseFloat(hourly["temperature_2m"][t]);
+                                            if (tVal > maxTempPast24h) maxTempPast24h = tVal;
+                                        }
+                                    }
+                                }
+                                if (maxTempPast24h === -999) maxTempPast24h = temp;
+
+                                let cr = 0, sr = 0, haz = 0, fScale = -1;
+
+                                if (precip > 0 || cape > 100) {
+                                    cr += Math.min(precip / 4.0, 4) + Math.min(cape / 400.0, 3) + Math.min(wg_ms / 8.0, 3);
+                                }
+                                if (precip > 0 && temp <= 2) {
+                                    sr += Math.min(precip / 2.5, 5) + Math.min(wg_ms / 6.0, 5);
+                                }
+
+                                if ((cape > 1200 && temp > 15) || (maxTempPast24h > 23 && cape > 700 && precip > 0)) {
+                                    haz |= (1 << 0); // I — Град
+                                }
+                                if (wg_ms >= 20) haz |= (1 << 1); // II — Шквал
+
+                                // --- МАТЕМАТИКА ЯДРА ТОРНАДО (КЛАССИЧЕСКАЯ ШКАЛА ФУДЗИТЫ F0 - F5) ---
+                                if (cape > 2000 && wg_ms >= 25) {
+                                    haz |= (1 << 2); // III — Торнадо истина
+
+                                    if (cape > 4200 || wg_ms >= 42) fScale = 5;
+                                    else if (cape > 3500 || wg_ms >= 36) fScale = 4;
+                                    else if (cape > 3000 || wg_ms >= 31) fScale = 3;
+                                    else if (cape > 2600 || wg_ms >= 28) fScale = 2;
+                                    else if (cape > 2200 || wg_ms >= 26) fScale = 1;
+                                    else fScale = 0;
+                                }
+
+                                if (snow > 0 && rain > 0) haz |= (1 << 3);
+                                if (wg_ms >= 20 && vis <= 1000) haz |= (1 << 4);
+                                if (rain > 0 && temp < 0) haz |= (1 << 5);
+
+                                cr = Math.floor(Math.min(Math.max(cr, 0), 10));
+                                sr = Math.floor(Math.min(Math.max(sr, 0), 10));
+
+                                drawnPointsCache.push({ lat: point.lat, lon: point.lon, cr: cr, sr: sr, haz: haz, fScale: fScale, step: step });
+                            }
+                        }
+                    } catch(e) { console.error("Chunk error:", e); }
+                    completed++;
+                    statusEl.innerText = `Скачивание: ${completed} из ${chunks.length} кусков...`;
+                    if (progressEl) progressEl.style.width = Math.round(completed / chunks.length * 100) + '%';
+                    await new Promise(r => setTimeout(r, 600));
+                }
+                renderSavedData();
+                statusEl.innerText = `Готово! Шаг сетки: ~${Math.round(step * 111)} км`;
+                statusEl.style.color = "#00ff00";
+                btn.innerText = '✓ SCAN COMPLETE';
+            } catch (err) {
+                statusEl.innerText = "Ошибка: " + err.message;
+                statusEl.style.color = "#ff3333";
+                btn.innerText = '⚠ SCAN FAILED';
+            }
+            finally {
+                btn.disabled = false;
+                setTimeout(() => { btn.innerText = '📡 SCAN AREA'; }, 2500);
+            }
+        }
+
+        function getBilinearInterpolated(array, width, height, x, y) {
+            const x1 = Math.floor(x), y1 = Math.floor(y);
+            const x2 = Math.min(x1 + 1, width - 1), y2 = Math.min(y1 + 1, height - 1);
+            const dx = x - x1, dy = y - y1;
+
+            const top = array[y1 * width + x1] * (1 - dx) + array[y1 * width + x2] * dx;
+            const bottom = array[y2 * width + x1] * (1 - dx) + array[y2 * width + x2] * dx;
+            return top * (1 - dy) + bottom * dy;
+        }
+
+        function upsampleGridMatrix(values, width, height, factor) {
+            const newWidth = width * factor;
+            const newHeight = height * factor;
+            const newValues = new Array(newWidth * newHeight);
+
+            for (let ny = 0; ny < newHeight; ny++) {
+                for (let nx = 0; nx < newWidth; nx++) {
+                    const origX = nx / factor;
+                    const origY = ny / factor;
+                    newValues[ny * newWidth + nx] = getBilinearInterpolated(values, width, height, origX, origY);
+                }
+            }
+            return { data: newValues, w: newWidth, h: newHeight };
+        }
+
+        function smoothRing(ring, iterations = 4) {
+            if (ring.length < 4) return ring;
+            let current = ring.slice(0, -1);
+            for (let i = 0; i < iterations; i++) {
+                const next = []; const len = current.length;
+                for (let j = 0; j < len; j++) {
+                    const p1 = current[j]; const p2 = current[(j + 1) % len];
+                    next.push([ 0.75 * p1[0] + 0.25 * p2[0], 0.75 * p1[1] + 0.25 * p2[1] ]);
+                    next.push([ 0.25 * p1[0] + 0.75 * p2[0], 0.25 * p1[1] + 0.75 * p2[1] ]);
+                }
+                current = next;
+            }
+            current.push([...current[0]]);
+            return current;
+        }
+
+        // Обновление приборного статус-блока (только реальные данные из кэша)
+        function updateStatusStats() {
+            const statZ = document.getElementById('stat-zones');
+            const statM = document.getElementById('stat-max');
+            if (!statZ || !statM) return;
+            if (drawnPointsCache.length === 0) { statZ.innerText = '—'; statM.innerText = '—'; return; }
+            let zones = 0, maxR = 0;
+            drawnPointsCache.forEach(p => {
+                const r = currentMode === 'CR' ? p.cr : p.sr;
+                if (r > 0) zones++;
+                if (r > maxR) maxR = r;
+            });
+            statZ.innerText = zones;
+            statM.innerText = maxR + '/10';
+        }
+
+        function renderSavedData() {
+            riskLayer.clearLayers(); labelsLayer.clearLayers();
+            updateStatusStats();
+            if (drawnPointsCache.length === 0) return;
+            const renderMode = document.getElementById('render-mode').value;
+
+            if (renderMode === 'isoline') {
+                const lons = [...new Set(drawnPointsCache.map(p => p.lon))].sort((a,b)=>a-b);
+                const lats = [...new Set(drawnPointsCache.map(p => p.lat))].sort((a,b)=>a-b);
+
+                const pad = 2;
+                const width = lons.length + pad * 2; const height = lats.length + pad * 2;
+
+                const values = new Array(width * height).fill(0);
+                const haz1Values = new Array(width * height).fill(0);
+                const haz2Values = new Array(width * height).fill(0);
+                const haz3Values = new Array(width * height).fill(0);
+
+                drawnPointsCache.forEach(pt => {
+                    const x = lons.indexOf(pt.lon) + pad;
+                    const y = (lats.length - 1 - lats.indexOf(pt.lat)) + pad;
+                    const idx = y * width + x;
+                    values[idx] = currentMode === 'CR' ? pt.cr : pt.sr;
+                    if (currentMode === 'CR') {
+                        if (pt.haz & (1 << 0)) haz1Values[idx] = 1;
+                        if (pt.haz & (1 << 1)) haz2Values[idx] = 1;
+                        if (pt.haz & (1 << 2)) haz3Values[idx] = 1;
+                    } else {
+                        if (pt.haz & (1 << 3)) haz1Values[idx] = 1;
+                        if (pt.haz & (1 << 4)) haz2Values[idx] = 1;
+                        if (pt.haz & (1 << 5)) haz3Values[idx] = 1;
+                    }
+                });
+
+                const upsampleFactor = 4;
+                const cellStep = drawnPointsCache[0].step;
+                const minLon = lons[0]; const maxLat = lats[lats.length - 1];
+
+                const mapToCoords = (x, y) => {
+                    const origX = x / upsampleFactor;
+                    const origY = y / upsampleFactor;
+                    return [minLon + (origX - pad) * cellStep, maxLat - (origY - pad) * cellStep];
+                };
+
+                const upsampledBase = upsampleGridMatrix(values, width, height, upsampleFactor);
+
+                const thresholds = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5];
+                const contours = d3.contours().size([upsampledBase.w, upsampledBase.h]).thresholds(thresholds)(upsampledBase.data);
+
+                contours.forEach(contour => {
+                    if (contour.coordinates.length === 0) return;
+                    const level = Math.ceil(contour.value);
+                    const color = PALETTES[currentMode][level];
+                    if (!color) return;
+
+                    const geojson = {
+                        type: "Feature",
+                        geometry: {
+                            type: contour.type,
+                            coordinates: contour.coordinates.map(polygon => polygon.map(ring => smoothRing(ring.map(coord => mapToCoords(coord[0], coord[1])), 4)))
+                        }
+                    };
+
+                    L.geoJSON(geojson, { style: { fillColor: color, fillOpacity: 1, color: 'rgba(0,0,0,0.15)', weight: 1.2, lineJoin: 'round' }, interactive: false }).addTo(riskLayer);
+                });
+
+                const drawHazardContour = (hazArray, patternUrl) => {
+                    const upsampledHaz = upsampleGridMatrix(hazArray, width, height, upsampleFactor);
+                    const hazContours = d3.contours().size([upsampledHaz.w, upsampledHaz.h]).thresholds([0.5])(upsampledHaz.data);
+
+                    hazContours.forEach(contour => {
+                        if (contour.coordinates.length === 0) return;
+                        const geojson = {
+                            type: "Feature",
+                            geometry: {
+                                type: contour.type,
+                                coordinates: contour.coordinates.map(polygon => polygon.map(ring => smoothRing(ring.map(coord => mapToCoords(coord[0], coord[1])), 4)))
+                            }
+                        };
+                        L.geoJSON(geojson, { style: { fillColor: patternUrl, fillOpacity: 1, color: 'rgba(0,0,0,0.3)', weight: 1.5, dashArray: '4, 4', lineJoin: 'round' }, interactive: false }).addTo(labelsLayer);
+                    });
+                };
+
+                if (currentMode === 'CR') {
+                    drawHazardContour(haz1Values, 'url(#pat-hail)');
+                    drawHazardContour(haz2Values, 'url(#pat-squall)');
+                    drawHazardContour(haz3Values, 'url(#pat-tornado)');
+                } else {
+                    drawHazardContour(haz1Values, 'url(#pat-wetsnow)');
+                    drawHazardContour(haz2Values, 'url(#pat-squall)');
+                    drawHazardContour(haz3Values, 'url(#pat-grid)');
+                }
+
+                drawnPointsCache.forEach(pt => {
+                    if (currentMode === 'CR' && pt.fScale >= 0) {
+                        const drawProbRect = (sizeMult, color) => {
+                            const latSize = pt.step * sizeMult; const lonSize = pt.step * sizeMult * 1.5;
+                            L.rectangle([[pt.lat - latSize, pt.lon - lonSize], [pt.lat + latSize, pt.lon + lonSize]], {
+                                color: color, weight: 2, fillColor: color, fillOpacity: 0.12, dashArray: '4,4', interactive: false
+                            }).addTo(labelsLayer);
+                        };
+
+                        if (pt.fScale >= 0) drawProbRect(4.5, '#00ff00');
+                        if (pt.fScale >= 1) drawProbRect(3.5, '#ffff00');
+                        if (pt.fScale >= 2) drawProbRect(2.8, '#ff9900');
+                        if (pt.fScale >= 3) drawProbRect(2.0, '#ff0000');
+                        if (pt.fScale >= 4) drawProbRect(1.2, '#ff00ff');
+                    }
+                });
+                document.getElementById('status').innerText = `Векторный рендер (Узлов: ${drawnPointsCache.length})`;
+                return;
+            }
+
+            // --- ПИКСЕЛЬНЫЙ РЕЖИМ ---
+            let count = 0;
+            drawnPointsCache.forEach(pt => {
+                let targetRisk = currentMode === 'CR' ? pt.cr : pt.sr;
+                if (targetRisk > 0) {
+                    const halfStep = pt.step / 2.0;
+                    const cellBounds = [[pt.lat - halfStep, pt.lon - halfStep], [pt.lat + halfStep, pt.lon + halfStep]];
+                    const cellColor = PALETTES[currentMode][targetRisk];
+                    L.rectangle(cellBounds, { color: cellColor, weight: 0, fillColor: cellColor, fillOpacity: 1, interactive: false }).addTo(riskLayer);
+
+                    let patterns = [];
+                    if (currentMode === 'CR') {
+                        if (pt.haz & (1 << 0)) patterns.push('url(#pat-hail)');
+                        if (pt.haz & (1 << 1)) patterns.push('url(#pat-squall)');
+                        if (pt.haz & (1 << 2)) patterns.push('url(#pat-tornado)');
+                    } else {
+                        if (pt.haz & (1 << 3)) patterns.push('url(#pat-wetsnow)');
+                        if (pt.haz & (1 << 4)) patterns.push('url(#pat-squall)');
+                        if (pt.haz & (1 << 5)) patterns.push('url(#pat-grid)');
+                    }
+
+                    patterns.forEach(pat => {
+                        L.rectangle(cellBounds, { color: 'rgba(0,0,0,0.5)', weight: 1, dashArray: '3, 3', fillColor: pat, fillOpacity: 1, interactive: false }).addTo(labelsLayer);
+                    });
+
+                    if (currentMode === 'CR' && pt.fScale >= 0) {
+                        const drawProbRect = (sizeMult, color) => {
+                            const latSize = pt.step * sizeMult; const lonSize = pt.step * sizeMult * 1.5;
+                            L.rectangle([[pt.lat - latSize, pt.lon - lonSize], [pt.lat + latSize, pt.lon + lonSize]], { color: color, weight: 1.5, fillColor: color, fillOpacity: 0.12, dashArray: '4,4', interactive: false }).addTo(labelsLayer);
+                        };
+                        if (pt.fScale >= 0) drawProbRect(4.5, '#00ff00');
+                        if (pt.fScale >= 1) drawProbRect(3.5, '#ffff00');
+                        if (pt.fScale >= 2) drawProbRect(2.8, '#ff9900');
+                        if (pt.fScale >= 3) drawProbRect(2.0, '#ff0000');
+                        if (pt.fScale >= 4) drawProbRect(1.2, '#ff00ff');
+                    }
+                    count++;
+                }
+            });
+            document.getElementById('status').innerText = `Пиксельный рендер (Зон: ${count})`;
+        }
+
+        updateLegend();
+    </script>
+</body>
+</html>
